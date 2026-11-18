@@ -93,6 +93,63 @@ def _make_progress_keyboard(video_id: str, lang: Optional[str] = "pt") -> Inline
     )
 
 
+
+YOUTUBE_CHOICES: dict[tuple[int, int], dict[str, Any]] = {}
+YOUTUBE_CHOICE_TTL = 900
+
+
+def _is_standard_youtube_video(url: str) -> bool:
+    from urllib.parse import urlparse, parse_qs
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    params = parse_qs(parsed.query)
+    if params.get("list"):
+        return False
+    if host in {"youtu.be", "www.youtu.be"}:
+        return bool(parsed.path.strip("/"))
+    return (host in {"youtube.com", "www.youtube.com", "m.youtube.com",
+                     "youtube-nocookie.com", "www.youtube-nocookie.com"}
+            and parsed.path == "/watch" and bool(params.get("v")))
+
+
+def _youtube_choice_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🎬 Vídeo" if _is_pt(lang) else "🎬 Video", callback_data="ytchoice:video"),
+        InlineKeyboardButton(text="🎵 Áudio" if _is_pt(lang) else "🎵 Audio", callback_data="ytchoice:audio"),
+    ]])
+
+
+@router.callback_query(F.data.in_({"ytchoice:video", "ytchoice:audio"}))
+async def choose_youtube_media(call: types.CallbackQuery):
+    if not isinstance(call.message, types.Message):
+        await call.answer()
+        return
+    key = (call.message.chat.id, call.message.message_id)
+    choice = YOUTUBE_CHOICES.get(key)
+    if not choice or time.monotonic() - choice["created"] > YOUTUBE_CHOICE_TTL:
+        YOUTUBE_CHOICES.pop(key, None)
+        await call.answer("Seleção expirada. Envie o link novamente.", show_alert=True)
+        return
+    if call.from_user.id != choice["user_id"]:
+        await call.answer("Esta seleção pertence a outro usuário.", show_alert=True)
+        return
+    YOUTUBE_CHOICES.pop(key, None)
+    mode = call.data.split(":", 1)[1]
+    await call.answer()
+    await safe_edit_text(
+        call.message,
+        bm.downloading_video_status(lang=choice["lang"]) if mode == "video"
+        else bm.downloading_audio_status(lang=choice["lang"]),
+        reply_markup=None,
+    )
+    if mode == "video":
+        await download_video(choice["message"], direct_url=choice["url"],
+                             selected=True, selected_status=call.message)
+    else:
+        await download_music(choice["message"], direct_url=choice["url"],
+                             selected_status=call.message)
+
+
 def safe_int(value, default: int = 0) -> int:
     try:
         return int(value)
@@ -314,7 +371,7 @@ async def handle_youtube_progress_callback(call: types.CallbackQuery):
     F.text.regexp(YOUTUBE_VIDEO_URL_REGEX, mode="search")
     | F.caption.regexp(YOUTUBE_VIDEO_URL_REGEX, mode="search")
 )
-async def download_video(message: types.Message, direct_url: Optional[str] = None):
+async def download_video(message: types.Message, direct_url: Optional[str] = None, *, selected: bool = False, selected_status: Optional[types.Message] = None):
     url = direct_url or _extract_youtube_url(
         get_message_text(message), YOUTUBE_VIDEO_URL_REGEX
     )
@@ -337,7 +394,7 @@ async def download_video(message: types.Message, direct_url: Optional[str] = Non
         chat_type=message.chat.type,
         action_name="youtube_video",
     )
-    status_message: Optional[types.Message] = None
+    status_message: Optional[types.Message] = selected_status
     request_lease = None
     show_service_status = business_id is None
     video_id: Optional[str] = None
@@ -350,6 +407,20 @@ async def download_video(message: types.Message, direct_url: Optional[str] = Non
         user_settings = await load_user_settings(db, message)
         user_lang = user_settings.get("language") or await db.get_language(message.from_user.id)
 
+        if not selected and not direct_url and business_id is None and _is_standard_youtube_video(url):
+            request_lease.finish()
+            request_lease = None
+            for key, item in list(YOUTUBE_CHOICES.items()):
+                if time.monotonic() - item["created"] > YOUTUBE_CHOICE_TTL:
+                    YOUTUBE_CHOICES.pop(key, None)
+            prompt = ("Escolha como deseja baixar este vídeo:" if _is_pt(user_lang)
+                      else "Choose how to download this video:")
+            selection = await message.answer(prompt, reply_markup=_youtube_choice_keyboard(user_lang))
+            YOUTUBE_CHOICES[(selection.chat.id, selection.message_id)] = {
+                "message": message, "url": url, "user_id": message.from_user.id,
+                "lang": user_lang, "created": time.monotonic(),
+            }
+            return
         user_captions = user_settings["captions"]
         bot_url = await get_bot_url(bot)
         yt = await _get_youtube_video_with_timeout(url)
@@ -362,7 +433,7 @@ async def download_video(message: types.Message, direct_url: Optional[str] = Non
         video_id = yt.get("id") or "video"
         progress_kb = _make_progress_keyboard(video_id, lang=user_lang)
 
-        if show_service_status:
+        if show_service_status and status_message is None:
             status_message = await message.answer(
                 bm.downloading_video_status(lang=user_lang),
                 reply_markup=progress_kb,
@@ -546,7 +617,7 @@ async def download_video(message: types.Message, direct_url: Optional[str] = Non
     | F.caption.regexp(YOUTUBE_MUSIC_URL_REGEX, mode="search")
 )
 @with_message_logging("youtube", "music_message")
-async def download_music(message: types.Message, direct_url: Optional[str] = None):
+async def download_music(message: types.Message, direct_url: Optional[str] = None, *, selected_status: Optional[types.Message] = None):
     url = direct_url or _extract_youtube_url(
         get_message_text(message), YOUTUBE_MUSIC_URL_REGEX
     )
@@ -564,7 +635,7 @@ async def download_music(message: types.Message, direct_url: Optional[str] = Non
         message.from_user.username,
         summarize_url_for_log(url),
     )
-    status_message: Optional[types.Message] = None
+    status_message: Optional[types.Message] = selected_status
     request_lease = None
     show_service_status = business_id is None
     try:
@@ -576,7 +647,7 @@ async def download_music(message: types.Message, direct_url: Optional[str] = Non
         user_lang = user_settings.get("language") or await db.get_language(message.from_user.id)
         bot_url = await get_bot_url(bot)
         bot_avatar = await get_bot_avatar_thumbnail(bot)
-        if show_service_status:
+        if show_service_status and status_message is None:
             status_message = await message.answer(bm.downloading_audio_status(lang=user_lang))
 
         yt = await _get_youtube_video_with_timeout(url)
