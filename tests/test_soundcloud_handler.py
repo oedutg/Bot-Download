@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from conftest import FakeYoutubeDL
 from handlers import soundcloud
+from services.platforms import soundcloud_media
 from utils.download_manager import DownloadMetrics
 
 
@@ -12,157 +14,57 @@ def test_strip_soundcloud_url_strips_tracking():
     assert soundcloud.strip_soundcloud_url(url) == "https://soundcloud.com/artist/track-name"
 
 
-def test_parse_soundcloud_track_tunnel():
-    payload = {
-        "status": "tunnel",
-        "url": "https://cdn.example.com/audio.mp3",
-        "filename": "artist-track.mp3",
-    }
-    track = soundcloud.parse_soundcloud_track(payload, "https://soundcloud.com/artist/track")
-    assert track is not None
-    assert track.audio_url == "https://cdn.example.com/audio.mp3"
-    assert track.title != ""
-    same_track = soundcloud.parse_soundcloud_track(payload, "https://soundcloud.com/artist/track")
-    other_track = soundcloud.parse_soundcloud_track(payload, "https://soundcloud.com/artist/other")
-    assert same_track is not None and same_track.id == track.id
-    assert other_track is not None and other_track.id != track.id
+@pytest.mark.asyncio
+async def test_soundcloud_service_extracts_metadata_from_short_link(monkeypatch, tmp_path):
+    url = "https://on.soundcloud.com/s5ZquEqx9nmtTyJPPh"
+    extract_info = Mock(
+        return_value={
+            "title": "Track Title",
+            "artists": ["Artist Name"],
+            "thumbnail": "https://cdn.example.com/cover.jpg",
+            "duration": 123.6,
+        }
+    )
+    ydl = FakeYoutubeDL({})
+    ydl.extract_info = extract_info
+    monkeypatch.setattr(soundcloud_media, "YoutubeDL", lambda _opts: ydl)
 
+    track = await soundcloud.SoundCloudService(str(tmp_path)).fetch_track(url)
 
-def test_parse_soundcloud_track_local_processing_with_cover():
-    payload = {
-        "status": "local-processing",
-        "type": "audio",
-        "tunnel": [
-            "https://cdn.example.com/cover.jpg",
-            "https://cdn.example.com/final.mp3",
-        ],
-        "output": {
-            "type": "audio/mpeg",
-            "filename": "final.mp3",
-            "metadata": {
-                "title": "Track Title",
-                "artist": "Artist Name",
-                "duration": "123.6",
-            },
-        },
-        "audio": {"cover": True},
-    }
-    track = soundcloud.parse_soundcloud_track(payload, "https://soundcloud.com/artist/track")
-    assert track is not None
-    assert track.audio_url == "https://cdn.example.com/final.mp3"
-    assert track.thumbnail_url == "https://cdn.example.com/cover.jpg"
+    extract_info.assert_called_once_with(url, download=False)
+    assert track.source_url == url
     assert track.title == "Track Title"
     assert track.artist == "Artist Name"
+    assert track.thumbnail_url == "https://cdn.example.com/cover.jpg"
     assert track.duration_seconds == 124
 
 
-def test_parse_soundcloud_track_deduplicates_repeated_artist_metadata():
-    payload = {
-        "status": "local-processing",
-        "type": "audio",
-        "tunnel": ["https://cdn.example.com/final.mp3"],
-        "output": {
-            "type": "audio/mpeg",
-            "metadata": {
-                "title": "Тону",
-                "artist": "SUDNO, sudno, SUDNO, Sudno, SUDNO",
-            },
-        },
-        "audio": {"cover": False},
-    }
-
-    track = soundcloud.parse_soundcloud_track(payload, "https://soundcloud.com/sudno_mp3/tonu")
-
-    assert track is not None
-    assert track.artist == "SUDNO"
-
-
-def test_parse_soundcloud_track_recognizes_extensionless_cobalt_cover_tunnel():
-    payload = {
-        "status": "local-processing",
-        "type": "audio",
-        "tunnel": [
-            "https://cobalt.example/tunnel/audio-token",
-            "https://cobalt.example/tunnel/cover-token",
-        ],
-        "output": {
-            "type": "audio/mpeg",
-            "metadata": {"title": "Track", "artist": "Artist"},
-        },
-        "audio": {"cover": True},
-    }
-
-    track = soundcloud.parse_soundcloud_track(payload, "https://soundcloud.com/artist/track")
-
-    assert track is not None
-    assert track.audio_url.endswith("/audio-token")
-    assert track.thumbnail_url.endswith("/cover-token")
-
-
 @pytest.mark.asyncio
-async def test_soundcloud_service_fetch_track_uses_cobalt_client(monkeypatch, tmp_path):
-    captured = {}
-    payload = {
-        "status": "tunnel",
-        "url": "https://cdn.example.com/audio.mp3",
-        "filename": "track.mp3",
-    }
+async def test_soundcloud_service_downloads_mp3_from_short_link(monkeypatch, tmp_path):
+    url = "https://on.soundcloud.com/s5ZquEqx9nmtTyJPPh"
+    downloads = []
 
-    async def fake_fetch_cobalt_data(base_url, api_key, request_payload, **kwargs):
-        captured["base_url"] = base_url
-        captured["api_key"] = api_key
-        captured["payload"] = request_payload
-        captured["kwargs"] = kwargs
-        return payload
+    def build_downloader(options):
+        ydl = FakeYoutubeDL(options, ext="mp3")
+        downloads.append(ydl)
+        return ydl
 
-    monkeypatch.setattr(soundcloud, "COBALT_API_URL", "https://cobalt.test")
-    monkeypatch.setattr(soundcloud, "COBALT_API_KEY", "test-key")
-    monkeypatch.setattr(soundcloud, "fetch_cobalt_data", fake_fetch_cobalt_data)
+    async def run_queued(runner, **_kwargs):
+        return await runner()
 
-    service = soundcloud.SoundCloudService(output_dir=str(tmp_path))
-    track = await service.fetch_track("https://soundcloud.com/artist/track")
+    queue = SimpleNamespace(submit=AsyncMock(side_effect=run_queued))
+    monkeypatch.setattr(soundcloud_media, "get_download_queue", lambda: queue)
+    monkeypatch.setattr(soundcloud_media, "YoutubeDL", build_downloader)
 
-    assert track is not None
-    assert captured["base_url"] == "https://cobalt.test"
-    assert captured["api_key"] == "test-key"
-    assert captured["payload"]["downloadMode"] == "audio"
-    assert captured["kwargs"]["source"] == "soundcloud"
-
-
-@pytest.mark.asyncio
-async def test_soundcloud_service_download_media_success(monkeypatch, tmp_path):
-    service = soundcloud.SoundCloudService(output_dir=str(tmp_path))
-
-    async def fake_download(url, filename, **_kwargs):
-        path = tmp_path / filename
-        path.write_bytes(b"audio")
-        return DownloadMetrics(
-            url=url,
-            path=str(path),
-            size=path.stat().st_size,
-            elapsed=0.01,
-            used_multipart=False,
-            resumed=False,
-        )
-
-    monkeypatch.setattr(service._downloader, "download", fake_download)
-    metrics = await service.download_media("https://cdn.example.com/audio.mp3", "track.mp3")
+    service = soundcloud.SoundCloudService(str(tmp_path))
+    metrics = await service.download_media(url, user_id=42, request_id="request")
 
     assert metrics is not None
-    assert (tmp_path / "track.mp3").exists()
-
-
-@pytest.mark.asyncio
-async def test_soundcloud_service_download_media_handles_error(monkeypatch, tmp_path):
-    service = soundcloud.SoundCloudService(output_dir=str(tmp_path))
-
-    async def fake_download(*_args, **_kwargs):
-        raise soundcloud.DownloadError("boom")
-
-    monkeypatch.setattr(service._downloader, "download", fake_download)
-    metrics = await service.download_media("https://cdn.example.com/audio.mp3", "track.mp3")
-
-    assert metrics is None
+    assert metrics.url == url
+    assert downloads[0].urls == [url]
+    assert downloads[0].options["postprocessors"][0]["preferredcodec"] == "mp3"
+    assert [path.name for path in tmp_path.iterdir()] == [metrics.path.rsplit("/", 1)[-1]]
+    assert queue.submit.await_args.kwargs["source"] == "soundcloud"
 
 
 @pytest.mark.asyncio
@@ -183,7 +85,7 @@ async def test_inline_soundcloud_uses_bot_avatar_thumbnail(monkeypatch, tmp_path
     result = SimpleNamespace(
         result_id=f"soundcloud_inline:{token}",
         inline_message_id="inline-message-1",
-        from_user=SimpleNamespace(full_name="Inline User"),
+        from_user=SimpleNamespace(id=42, full_name="Inline User"),
     )
     audio_path = tmp_path / "track.mp3"
     audio_path.write_bytes(b"audio")
@@ -202,9 +104,7 @@ async def test_inline_soundcloud_uses_bot_avatar_thumbnail(monkeypatch, tmp_path
         "fetch_track",
         AsyncMock(
             return_value=soundcloud.SoundCloudTrack(
-                id="track-1",
                 source_url="https://soundcloud.com/artist/track",
-                audio_url="https://cdn.example.com/audio.mp3",
                 title="Track Title",
                 artist="Artist Name",
                 thumbnail_url="https://cdn.example.com/cover.jpg",
@@ -217,6 +117,7 @@ async def test_inline_soundcloud_uses_bot_avatar_thumbnail(monkeypatch, tmp_path
         "download_media",
         AsyncMock(return_value=metrics),
     )
+    monkeypatch.setattr(soundcloud.db, "get_language", AsyncMock(return_value="pt"))
     monkeypatch.setattr(soundcloud.db, "get_file_id", AsyncMock(return_value=None))
     monkeypatch.setattr(soundcloud.db, "add_file", AsyncMock())
     monkeypatch.setattr(soundcloud, "get_bot_url", AsyncMock(return_value="https://t.me/maxloadbot"))
@@ -262,9 +163,7 @@ async def test_inline_soundcloud_query_prefers_track_thumbnail(monkeypatch):
         answer=AsyncMock(),
     )
     track = soundcloud.SoundCloudTrack(
-        id="track-1",
         source_url="https://soundcloud.com/artist/track",
-        audio_url="https://cdn.example.com/audio.mp3",
         title="Track Title",
         artist="Artist Name",
         thumbnail_url="https://cdn.example.com/cover.jpg",
@@ -272,6 +171,7 @@ async def test_inline_soundcloud_query_prefers_track_thumbnail(monkeypatch):
 
     monkeypatch.setattr(soundcloud, "CHANNEL_ID", -1001234567890)
     monkeypatch.setattr(soundcloud, "send_analytics", AsyncMock())
+    monkeypatch.setattr(soundcloud.db, "get_language", AsyncMock(return_value="pt"))
     monkeypatch.setattr(soundcloud.db, "user_settings", AsyncMock(return_value=settings))
     monkeypatch.setattr(soundcloud.soundcloud_service, "fetch_track", AsyncMock(return_value=track))
 

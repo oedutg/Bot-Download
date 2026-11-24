@@ -49,8 +49,8 @@ class CobaltMediaService:
     """Concrete shared base for Cobalt-backed platform media services.
 
     Owns the common downloader configuration, the Cobalt request helper, and
-    the retryable download_media wrapper shared by the Instagram, Pinterest,
-    SoundCloud and Threads services.
+    the retryable download_media wrapper shared by the Instagram, Pinterest and
+    Threads services.
     """
 
     _COBALT_TIMEOUT_SECONDS = 15
