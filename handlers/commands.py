@@ -3,11 +3,12 @@ import re
 import shutil
 import time
 from copy import copy
+from importlib.util import find_spec
 from typing import Optional
 
 from aiogram import types
 from aiogram.enums import ChatMemberStatus, ChatType
-from aiogram.types import ChatMemberUpdated
+from aiogram.types import ChatMemberUpdated, InlineKeyboardButton, InlineKeyboardMarkup
 
 import keyboards as kb
 import messages as bm
@@ -16,7 +17,8 @@ try:
 except ImportError:
     ADMIN_ID = 7717528550
 
-from handlers.utils import get_bot_username, get_message_text
+from handlers.utils import get_bot_username, get_message_text, safe_edit_text
+from messages.help_menu import HELP_SECTIONS, help_copy, help_text
 from services.logger import logger as logging
 from services.stats.chart import (
     _send_stats_photo,
@@ -151,8 +153,8 @@ async def send_welcome(message: types.Message):
     bot_username = await get_bot_username(user_mod.bot)
     user_lang = await user_mod.db.get_language(message.from_user.id)
     await message.reply(
-        bm.welcome_message(lang=user_lang),
-        reply_markup=kb.start_keyboard(bot_username, ref_user_id=message.from_user.id, lang=user_lang),
+        help_text("start", user_lang, bot_username, user_mod._MAX_BATCH_LINKS),
+        reply_markup=_help_keyboard("start", bot_username, user_lang, ref_user_id=message.from_user.id),
         parse_mode="HTML",
     )
 
@@ -177,8 +179,51 @@ async def send_help(message: types.Message):
     bot_username = await get_bot_username(user_mod.bot)
     user_lang = await user_mod.db.get_language(message.from_user.id)
     await message.reply(
-        bm.help_message(bot_username, lang=user_lang),
-        reply_markup=kb.start_keyboard(bot_username, lang=user_lang),
+        help_text("help", user_lang, bot_username, user_mod._MAX_BATCH_LINKS),
+        reply_markup=_help_keyboard("help", bot_username, user_lang),
+        parse_mode="HTML",
+    )
+
+
+def _help_keyboard(
+    page: str, bot_username: str | None, lang: str | None, *, ref_user_id: int | None = None
+) -> InlineKeyboardMarkup:
+    labels = help_copy(lang)
+    if page == "start":
+        existing = kb.start_keyboard(bot_username, ref_user_id=ref_user_id, lang=lang)
+        rows = [[InlineKeyboardButton(text=labels["help_button"], callback_data="help_menu:help")]]
+        return InlineKeyboardMarkup(inline_keyboard=rows + existing.inline_keyboard)
+    if page == "help":
+        buttons = [
+            InlineKeyboardButton(text=labels[section][0], callback_data=f"help_menu:{section}")
+            for section in HELP_SECTIONS
+        ]
+        rows = [buttons[:2], buttons[2:]]
+        back_page = "start"
+    else:
+        rows = []
+        back_page = "help"
+    rows.append([InlineKeyboardButton(text=labels["back"], callback_data=f"help_menu:{back_page}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def open_help_page(call: types.CallbackQuery):
+    await call.answer()
+    page = "help" if call.data == "start_supported_sites" else (call.data or "").partition(":")[2]
+    if page not in ("start", "help", *HELP_SECTIONS) or not isinstance(call.message, types.Message):
+        return
+    if await is_banned(call.from_user.id, call.message.chat.id):
+        return
+
+    lang = await user_mod.db.get_language(call.from_user.id)
+    bot_username = await get_bot_username(user_mod.bot)
+    await safe_edit_text(
+        call.message,
+        help_text(
+            page, lang, bot_username, user_mod._MAX_BATCH_LINKS,
+            audible=page == "audio" and find_spec("handlers.audible") is not None,
+        ),
+        reply_markup=_help_keyboard(page, bot_username, lang, ref_user_id=call.from_user.id),
         parse_mode="HTML",
     )
 
