@@ -49,9 +49,8 @@ async def test_added_router_works_in_batch_and_deletion_waits(monkeypatch):
     monkeypatch.setattr(types.Message, "answer", status)
     monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 2)
     monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
-    for name in ("update_info", "send_analytics", "safe_delete_message"):
+    for name in ("update_info", "send_analytics", "safe_edit_text"):
         monkeypatch.setattr(media_download, name, AsyncMock())
-    monkeypatch.setattr(media_download.asyncio, "sleep", AsyncMock())
 
     @extra.message(F.text.startswith("https://downloads.example/"))
     async def handle_link(message: types.Message):
