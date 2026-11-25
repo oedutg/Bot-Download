@@ -460,19 +460,17 @@ async def test_process_batch_links_dispatches_each_supported_link(monkeypatch):
         SimpleNamespace(delete=AsyncMock()),
     ]
     message.answer = AsyncMock(side_effect=status_messages)
-    process_supported_link = AsyncMock()
-
-    monkeypatch.setattr(media_download, "_process_supported_link", process_supported_link)
+    youtube = SimpleNamespace(service="youtube", deliver=AsyncMock())
+    pinterest = SimpleNamespace(service="pinterest", deliver=AsyncMock())
     monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 1)
     monkeypatch.setattr(media_download, "send_analytics", AsyncMock())
     monkeypatch.setattr(media_download, "update_info", AsyncMock())
     monkeypatch.setattr(media_download.asyncio, "sleep", AsyncMock())
 
-    await user.process_batch_links(message)
+    await user.process_batch_links(message, batch_items=[youtube, pinterest], batch_total=2)
 
-    assert process_supported_link.await_count == 2
-    process_supported_link.assert_any_await(message, "youtube", "https://youtu.be/demo")
-    process_supported_link.assert_any_await(message, "pinterest", "https://pin.it/demo123")
+    youtube.deliver.assert_awaited_once_with({})
+    pinterest.deliver.assert_awaited_once_with({})
     assert message.answer.await_count == 4
     assert all(status.delete.await_count == 1 for status in status_messages)
 
@@ -489,17 +487,17 @@ async def test_process_batch_links_can_run_parallel_when_load_is_low(monkeypatch
         SimpleNamespace(delete=AsyncMock()),
     ]
     message.answer = AsyncMock(side_effect=status_messages)
-    process_supported_link = AsyncMock()
-
-    monkeypatch.setattr(media_download, "_process_supported_link", process_supported_link)
+    youtube = SimpleNamespace(service="youtube", deliver=AsyncMock())
+    pinterest = SimpleNamespace(service="pinterest", deliver=AsyncMock())
     monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 2)
     monkeypatch.setattr(media_download, "send_analytics", AsyncMock())
     monkeypatch.setattr(media_download, "update_info", AsyncMock())
     monkeypatch.setattr(media_download.asyncio, "sleep", AsyncMock())
 
-    await user.process_batch_links(message)
+    await user.process_batch_links(message, batch_items=[youtube, pinterest], batch_total=2)
 
-    assert process_supported_link.await_count == 2
+    youtube.deliver.assert_awaited_once_with({})
+    pinterest.deliver.assert_awaited_once_with({})
     assert message.answer.await_count == 4
     assert all(status.delete.await_count == 1 for status in status_messages)
 
