@@ -3,7 +3,7 @@ import asyncio
 from aiogram import types
 
 import messages as bm
-from app_context import bot, send_analytics
+from app_context import bot, db, send_analytics
 from config import (
     BATCH_LINKS_MAX_CONCURRENCY,
     BATCH_LINKS_MAX_ITEMS,
@@ -11,13 +11,14 @@ from config import (
     BATCH_LINKS_PARALLEL_ACTIVE_JOBS_THRESHOLD,
     BATCH_LINKS_PARALLEL_QUEUE_DEPTH_THRESHOLD,
 )
+from handlers.batch_routes import BatchItem, deferred_source_deletes, resolve_batch
 from handlers.commands import open_help_page, update_info
-from handlers.utils import get_message_text, safe_delete_message
+from handlers.utils import get_message_text, maybe_delete_user_message, safe_delete_message
 from services.download.queue import get_download_queue
 from services.logger import logger as logging, summarize_url_for_log
 from services.stats.constants import SERVICE_DISPLAY_NAMES
 from services.inline.album_links import get_inline_album_request
-from services.links.detection import extract_supported_link, extract_supported_links
+from services.links.detection import extract_supported_link
 
 logging = logging.bind(service="media_download")
 
@@ -76,6 +77,11 @@ async def _process_supported_link(message: types.Message, service: str, url: str
         await kwai.process_kwai_link(message, direct_url=url)
         return
 
+    if service == "twitch":
+        from handlers.universal import process_universal_link
+        await process_universal_link(message, direct_url=url)
+        return
+
     if service == "instagram":
         from handlers import instagram
         await instagram.process_instagram_url(message, url=url)
@@ -114,9 +120,11 @@ async def _process_supported_link(message: types.Message, service: str, url: str
         await twitter.handle_tweet_links(message, direct_url=url)
 
 
-def _has_multiple_supported_links(message: types.Message) -> bool:
-    return len(extract_supported_links(get_message_text(message))) > 1
-
+async def _has_multiple_supported_links(message: types.Message, **data):
+    items, total = await resolve_batch(message, data, limit=_MAX_BATCH_LINKS)
+    if total < 2:
+        return False
+    return {"batch_items": items, "batch_total": total}
 
 def _resolve_batch_concurrency() -> int:
     min_concurrency = max(1, int(BATCH_LINKS_MIN_CONCURRENCY))
@@ -130,13 +138,18 @@ def _resolve_batch_concurrency() -> int:
     return max_concurrency
 
 
-async def process_batch_links(message: types.Message):
-    user_lang = await db.get_language(message.from_user.id)
-    links = extract_supported_links(get_message_text(message))
-    if len(links) <= 1:
+async def process_batch_links(
+    message: types.Message,
+    batch_items: list[BatchItem] | None = None,
+    batch_total: int | None = None,
+    **data,
+):
+    if batch_items is None:
+        batch_items, batch_total = await resolve_batch(message, data, limit=_MAX_BATCH_LINKS)
+    if batch_total is None or batch_total < 2:
         return
 
-    selected_links = links[:_MAX_BATCH_LINKS]
+    user_lang = await db.get_language(message.from_user.id)
     await send_analytics(
         user_id=message.from_user.id,
         chat_type=message.chat.type,
@@ -144,75 +157,51 @@ async def process_batch_links(message: types.Message):
     )
     await update_info(message)
 
-    concurrency = min(len(selected_links), _resolve_batch_concurrency())
-    status_message = await message.answer(
-        bm.batch_links_started(len(selected_links), len(links), lang=user_lang),
+    concurrency = min(len(batch_items), _resolve_batch_concurrency())
+    status = await message.answer(
+        bm.batch_links_started(len(batch_items), batch_total, lang=user_lang),
         parse_mode="HTML",
     )
+    deletes = []
+    token = deferred_source_deletes.set(deletes)
     try:
-        if concurrency > 1:
-            await safe_delete_message(status_message)
-            await _process_batch_links_parallel(message, selected_links, concurrency)
-            status_message = await message.answer(bm.batch_links_finished(len(selected_links), lang=user_lang))
-            return
-
-        for index, (service, url) in enumerate(selected_links, start=1):
-            service_name = SERVICE_DISPLAY_NAMES.get(service, service.title())
-            await safe_delete_message(status_message)
-            status_message = await message.answer(
-                bm.batch_link_progress(index, len(selected_links), service_name, lang=user_lang),
-            )
-            try:
-                await _process_supported_link(message, service, url)
-            except Exception as exc:
-                logging.exception(
-                    "Batch link failed: user_id=%s service=%s url=%s error=%s",
-                    message.from_user.id,
-                    service,
-                    summarize_url_for_log(url),
-                    exc,
-                )
-                await message.answer(bm.something_went_wrong(lang=user_lang))
-
-        await safe_delete_message(status_message)
-        status_message = await message.answer(bm.batch_links_finished(len(selected_links), lang=user_lang))
+        await safe_delete_message(status)
+        status = None
+        await _process_batch_links_parallel(message, batch_items, concurrency, data)
+        status = await message.answer(bm.batch_links_finished(len(batch_items), lang=user_lang))
     finally:
-        await asyncio.sleep(2)
-        await safe_delete_message(status_message)
+        deferred_source_deletes.reset(token)
+        if (message.chat.id, message.message_id) in deletes:
+            await maybe_delete_user_message(message, "on")
+        if status:
+            await asyncio.sleep(2)
+            await safe_delete_message(status)
 
 
 async def _process_batch_links_parallel(
     message: types.Message,
-    links: list[tuple[str, str]],
+    items: list[BatchItem],
     concurrency: int,
+    data: dict,
 ) -> None:
     user_lang = await db.get_language(message.from_user.id)
-    semaphore = asyncio.Semaphore(max(1, int(concurrency)))
-    total = len(links)
+    semaphore = asyncio.Semaphore(max(1, concurrency))
 
-    async def _run_one(index: int, service: str, url: str) -> None:
+    async def run_one(index: int, item: BatchItem) -> None:
         async with semaphore:
-            service_name = SERVICE_DISPLAY_NAMES.get(service, service.title())
-            status_message = await message.answer(
-                bm.batch_link_progress(index, total, service_name, lang=user_lang),
+            service_name = SERVICE_DISPLAY_NAMES.get(item.service, item.service.title())
+            status = await message.answer(
+                bm.batch_link_progress(index, len(items), service_name, lang=user_lang),
             )
             try:
-                await _process_supported_link(message, service, url)
-            except Exception as exc:
-                logging.exception(
-                    "Parallel batch link failed: user_id=%s service=%s url=%s error=%s",
-                    message.from_user.id,
-                    service,
-                    summarize_url_for_log(url),
-                    exc,
-                )
+                await item.deliver(data)
+            except Exception:
+                logging.exception("Batch link failed: service=%s", item.service)
                 await message.answer(bm.something_went_wrong(lang=user_lang))
             finally:
-                await safe_delete_message(status_message)
+                await safe_delete_message(status)
 
-    await asyncio.gather(
-        *(_run_one(index, service, url) for index, (service, url) in enumerate(links, start=1))
-    )
+    await asyncio.gather(*(run_one(index, item) for index, item in enumerate(items, 1)))
 
 
 async def show_supported_sites(call: types.CallbackQuery):

@@ -313,6 +313,13 @@ async def maybe_delete_user_message(message: types.Message, delete_flag: Any) ->
     if str(delete_flag).lower() != "on":
         return False
 
+    from handlers.batch_routes import deferred_source_deletes
+
+    pending = deferred_source_deletes.get()
+    if pending is not None:
+        pending.append((message.chat.id, message.message_id))
+        return True
+
     try:
         await message.delete()
         return True
