@@ -6,6 +6,14 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 _TRAILING_URL_PUNCTUATION = ".,;:!?)]}>\"'"
 
+TWITCH_CLIP_URL = re.compile(
+    r"(?<![\w/])(https?://(?:clips\.twitch\.tv/|"
+    r"(?:(?:www|m)\.)?twitch\.tv/[a-z0-9_]+/clip/)"
+    r"[a-z0-9_-]+/?(?:[?#][^\s<>]*)?)(?=$|[\s<>.,;!\])}])",
+    re.IGNORECASE,
+)
+
+
 _SERVICE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "tiktok",
@@ -20,6 +28,7 @@ _SERVICE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             re.IGNORECASE,
         ),
     ),
+    ("twitch", TWITCH_CLIP_URL),
     (
         "instagram",
         re.compile(r"(https?://(www\.)?instagram\.com/\S+)", re.IGNORECASE),
@@ -66,6 +75,8 @@ def _clean_url(url: str) -> str:
 
 def canonicalize_supported_url(service: str, url: str) -> str:
     cleaned = _clean_url(url)
+    if service == "twitch":
+        return cleaned
     try:
         parsed = urlparse(cleaned)
     except Exception:

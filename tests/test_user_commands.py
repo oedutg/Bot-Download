@@ -450,6 +450,7 @@ async def test_process_pending_message_dispatches_spotify(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_batch_links_dispatches_each_supported_link(monkeypatch):
+    monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
     message = DummyMessage()
     message.text = "https://youtu.be/demo and https://pin.it/demo123"
     status_messages = [
@@ -478,6 +479,7 @@ async def test_process_batch_links_dispatches_each_supported_link(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_batch_links_can_run_parallel_when_load_is_low(monkeypatch):
+    monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
     message = DummyMessage()
     message.text = "https://youtu.be/demo and https://pin.it/demo123"
     status_messages = [

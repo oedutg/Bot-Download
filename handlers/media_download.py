@@ -3,7 +3,7 @@ import asyncio
 from aiogram import types
 
 import messages as bm
-from app_context import bot, send_analytics
+from app_context import bot, db, send_analytics
 from config import (
     BATCH_LINKS_MAX_CONCURRENCY,
     BATCH_LINKS_MAX_ITEMS,
@@ -76,6 +76,11 @@ async def _process_supported_link(message: types.Message, service: str, url: str
         await kwai.process_kwai_link(message, direct_url=url)
         return
 
+    if service == "twitch":
+        from handlers.universal import process_universal_link
+        await process_universal_link(message, direct_url=url)
+        return
+
     if service == "instagram":
         from handlers import instagram
         await instagram.process_instagram_url(message, url=url)
@@ -115,7 +120,9 @@ async def _process_supported_link(message: types.Message, service: str, url: str
 
 
 def _has_multiple_supported_links(message: types.Message) -> bool:
-    return len(extract_supported_links(get_message_text(message))) > 1
+    return not getattr(message, "is_automatic_forward", False) and len(
+        extract_supported_links(get_message_text(message))
+    ) > 1
 
 
 def _resolve_batch_concurrency() -> int:
