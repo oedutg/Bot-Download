@@ -92,3 +92,30 @@ async def test_album_keeps_caption_once_and_sends_single_item_remainder(monkeypa
     assert len(second.args[1]) == 1
     assert second.kwargs["caption"] is None
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chat_type", "forwarded", "accepted"),
+    [
+        ("private", False, True),
+        ("group", False, True),
+        ("supergroup", False, True),
+        ("supergroup", True, False),
+        ("channel", False, False),
+    ],
+)
+async def test_bluesky_route_chat_types(chat_type, forwarded, accepted):
+    from datetime import datetime, timezone
+
+    from aiogram import types
+
+    message = types.Message(
+        message_id=1,
+        date=datetime.now(timezone.utc),
+        chat=types.Chat(id=1, type=chat_type),
+        text="https://bsky.app/profile/edu.bsky.social/post/abc",
+        is_automatic_forward=forwarded,
+    )
+    matched, _ = await bluesky.router.message.handlers[0].check(message)
+    assert matched is accepted

@@ -30,9 +30,9 @@ async def test_batch_uses_registered_handlers_and_preserves_group_rules():
     other = "https://example.org/video.mp4"
     text = "\n".join((twitch, drive, mega, bluesky, other))
     group, total = await resolve_batch(make_message(text), {"bot": bot}, limit=6)
-    assert total == 3
-    assert [item.service for item in group] == ["twitch", "google_drive", "mega"]
-    assert [item.message.text for item in group] == [twitch, drive, mega]
+    assert total == 4
+    assert [item.service for item in group] == ["twitch", "google_drive", "mega", "bluesky"]
+    assert [item.message.text for item in group] == [twitch, drive, mega, bluesky]
     private, total = await resolve_batch(make_message(text, "private"), {"bot": bot}, limit=6)
     assert total == 5
     assert [item.service for item in private][-2:] == ["bluesky", "universal"]

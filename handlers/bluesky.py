@@ -1,4 +1,4 @@
-"""Private-chat delivery of public Bluesky posts."""
+"""Deliver public Bluesky posts to Telegram chats."""
 
 from html import escape
 from pathlib import Path
@@ -57,7 +57,8 @@ async def _send_text(message: types.Message, text: str, bot_url: str, markup=Non
 
 
 @router.message(
-    F.chat.type == "private",
+    F.chat.type.in_({"private", "group", "supergroup"}),
+    ~F.is_automatic_forward,
     F.text.regexp(POST_URL, mode="search") | F.caption.regexp(POST_URL, mode="search"),
 )
 async def process_bluesky_post(message: types.Message) -> None:
