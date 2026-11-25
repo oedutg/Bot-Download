@@ -2,7 +2,6 @@ import asyncio
 
 from aiogram import types
 
-import keyboards as kb
 import messages as bm
 from app_context import bot, send_analytics
 from config import (
@@ -12,8 +11,8 @@ from config import (
     BATCH_LINKS_PARALLEL_ACTIVE_JOBS_THRESHOLD,
     BATCH_LINKS_PARALLEL_QUEUE_DEPTH_THRESHOLD,
 )
-from handlers.commands import update_info
-from handlers.utils import get_bot_username, get_message_text, safe_delete_message
+from handlers.commands import open_help_page, update_info
+from handlers.utils import get_message_text, safe_delete_message
 from services.download.queue import get_download_queue
 from services.logger import logger as logging, summarize_url_for_log
 from services.stats.constants import SERVICE_DISPLAY_NAMES
@@ -217,11 +216,4 @@ async def _process_batch_links_parallel(
 
 
 async def show_supported_sites(call: types.CallbackQuery):
-    user_lang = await db.get_language(call.from_user.id)
-    bot_username = await get_bot_username(bot)
-    await call.message.edit_text(
-        bm.help_message(bot_username, lang=user_lang),
-        reply_markup=kb.start_keyboard(bot_username, ref_user_id=call.from_user.id),
-        parse_mode="HTML",
-    )
-    await call.answer()
+    await open_help_page(call)

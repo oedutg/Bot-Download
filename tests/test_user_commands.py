@@ -76,6 +76,7 @@ async def test_update_info_adds_new_user(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_send_welcome(monkeypatch):
+    monkeypatch.setattr(user.db, "get_language", AsyncMock(return_value="pt"))
     fake_send_analytics = AsyncMock()
     fake_update_info = AsyncMock()
 
@@ -87,7 +88,10 @@ async def test_send_welcome(monkeypatch):
 
     fake_send_analytics.assert_awaited_once()
     message.reply.assert_awaited_once()
-    fake_update_info.assert_awaited_once_with(message)
+    fake_update_info.assert_not_awaited()
+    args, kwargs = message.reply.await_args
+    assert "Envie um link" in args[0]
+    assert kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "help_menu:help"
 
 
 @pytest.mark.asyncio
@@ -113,6 +117,7 @@ async def test_send_welcome_deeplink_skips_default_welcome(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_send_welcome_replays_pending_request_in_private_context(monkeypatch):
+    monkeypatch.setattr(user.db, "get_language", AsyncMock(return_value="pt"))
     fake_send_analytics = AsyncMock()
     fake_update_info = AsyncMock()
     fake_process_pending = AsyncMock()
@@ -498,12 +503,14 @@ async def test_process_batch_links_can_run_parallel_when_load_is_low(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_help_command_shows_supported_sites(monkeypatch):
+async def test_help_command_shows_help_categories(monkeypatch):
+    monkeypatch.setattr(user.db, "get_language", AsyncMock(return_value="pt"))
     message = DummyMessage()
 
     await user.send_help(message)
 
     message.reply.assert_awaited_once()
-    _, kwargs = message.reply.await_args
-    assert "reply_markup" in kwargs
+    args, kwargs = message.reply.await_args
+    assert "Central de ajuda" in args[0]
+    assert kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "help_menu:downloads"
     assert kwargs["parse_mode"] == "HTML"
