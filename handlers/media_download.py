@@ -22,7 +22,9 @@ from services.links.detection import extract_supported_link
 logging = logging.bind(service="media_download")
 
 _MAX_BATCH_LINKS = max(1, int(BATCH_LINKS_MAX_ITEMS))
-_BATCH_START_EMOJI = '<tg-emoji emoji-id="5854908544712707500">📦</tg-emoji>'
+_BATCH_START_EMOJI = '<tg-emoji emoji-id="6323328338123293863">📦</tg-emoji>'
+_BATCH_PROCESSING_EMOJI = '<tg-emoji emoji-id="5260491539167073671">🔄</tg-emoji>'
+_BATCH_PROCESSING_DELAY = 4.0
 _BATCH_END_EMOJI = '<tg-emoji emoji-id="5866355487255039002">🚀</tg-emoji>'
 _ALBUM_SERVICES = {"instagram", "threads", "tiktok", "pinterest", "twitter"}
 
@@ -159,14 +161,27 @@ async def process_batch_links(
     await update_info(message)
 
     concurrency = min(len(batch_items), _resolve_batch_concurrency())
-    status = await message.answer(
-        f"{_BATCH_START_EMOJI} " + bm.batch_links_started(len(batch_items), batch_total, lang=user_lang),
-        parse_mode="HTML",
-    )
+    running_text = bm.batch_links_started(len(batch_items), batch_total, lang=user_lang)
+    status = await message.answer(f"{_BATCH_START_EMOJI} {running_text}", parse_mode="HTML")
+    finished = asyncio.Event()
+
+    async def show_processing() -> None:
+        try:
+            await asyncio.wait_for(finished.wait(), timeout=_BATCH_PROCESSING_DELAY)
+        except TimeoutError:
+            await safe_edit_text(
+                status, f"{_BATCH_PROCESSING_EMOJI} {running_text}", parse_mode="HTML"
+            )
+
+    processing_update = asyncio.create_task(show_processing())
     deletes = []
     token = deferred_source_deletes.set(deletes)
     try:
-        await _process_batch_links_parallel(message, batch_items, concurrency, data)
+        try:
+            await _process_batch_links_parallel(message, batch_items, concurrency, data)
+        finally:
+            finished.set()
+            await processing_update
         await safe_edit_text(
             status,
             f"{_BATCH_END_EMOJI} " + bm.batch_links_finished(len(batch_items), lang=user_lang),

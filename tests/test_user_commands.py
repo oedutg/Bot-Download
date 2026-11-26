@@ -468,7 +468,7 @@ async def test_process_batch_links_dispatches_each_supported_link(monkeypatch):
     youtube.deliver.assert_awaited_once_with({})
     pinterest.deliver.assert_awaited_once_with({})
     message.answer.assert_awaited_once()
-    assert '<tg-emoji emoji-id="5854908544712707500">' in message.answer.await_args.args[0]
+    assert '<tg-emoji emoji-id="6323328338123293863">' in message.answer.await_args.args[0]
     edit.assert_awaited_once()
     assert edit.await_args.args[0] is status
     assert '<tg-emoji emoji-id="5866355487255039002">' in edit.await_args.args[1]
@@ -495,7 +495,7 @@ async def test_process_batch_links_can_run_parallel_when_load_is_low(monkeypatch
     youtube.deliver.assert_awaited_once_with({})
     pinterest.deliver.assert_awaited_once_with({})
     message.answer.assert_awaited_once()
-    assert '<tg-emoji emoji-id="5854908544712707500">' in message.answer.await_args.args[0]
+    assert '<tg-emoji emoji-id="6323328338123293863">' in message.answer.await_args.args[0]
     edit.assert_awaited_once()
     assert edit.await_args.args[0] is status
     assert '<tg-emoji emoji-id="5866355487255039002">' in edit.await_args.args[1]
