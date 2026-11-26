@@ -2,6 +2,8 @@ from urllib.parse import quote
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from messages.help_menu import help_copy
+
 DEFAULT_LANG = "pt"
 
 
@@ -43,33 +45,23 @@ def start_keyboard(
     username = bot_username or "SaveVidDLBot"
     base_link = f"https://t.me/{username}"
 
-    is_pt = _normalize_lang(lang) == "pt"
-    share_text = (
-        "Bot rápido para baixar vídeos do Instagram, TikTok, YouTube e mais!"
-        if is_pt
-        else "Fast downloader bot for Instagram, TikTok, YouTube & more!"
-    )
-    share_url = f"https://t.me/share/url?url={quote(base_link)}&text={quote(share_text)}"
+    labels = help_copy(lang)
+    share_url = f"https://t.me/share/url?url={quote(base_link)}&text={quote(labels['share_text'])}"
     add_to_group_url = f"https://t.me/{username}?startgroup=true"
-
-    txt_inline = "⚡ Modo inline" if is_pt else "⚡ Try inline"
-    txt_settings = "⚙️ Configurações" if is_pt else "⚙️ Settings"
-    txt_share = "🚀 Compartilhar bot" if is_pt else "🚀 Share bot"
-    txt_add = "➕ Adicionar a grupo" if is_pt else "➕ Add to group"
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=txt_inline, switch_inline_query_current_chat=""
+                    text=labels["inline_button"], switch_inline_query_current_chat=""
                 ),
                 InlineKeyboardButton(
-                    text=txt_settings, callback_data="back_to_settings"
+                    text=labels["settings_button"], callback_data="back_to_settings"
                 ),
             ],
             [
-                InlineKeyboardButton(text=txt_share, url=share_url),
-                InlineKeyboardButton(text=txt_add, url=add_to_group_url),
+                InlineKeyboardButton(text=labels["share_button"], url=share_url),
+                InlineKeyboardButton(text=labels["add_button"], url=add_to_group_url, style="success"),
             ],
         ]
     )

@@ -4,6 +4,11 @@ HELP_SECTIONS = ("downloads", "audio", "usage", "commands")
 
 _COPY = {
     "pt": {
+        "inline_button": "⚡ Modo inline",
+        "settings_button": "⚙️ Configurações",
+        "share_button": "🚀 Compartilhar bot",
+        "add_button": "➕ Adicionar a grupo",
+        "share_text": "Bot rápido para baixar vídeos do Instagram, TikTok, YouTube e mais!",
         "start": "<b>Bem-vindo ao Save Vídeo DL Bot!</b>\n\nEnvie um link para baixar vídeo, foto ou áudio. Para vários downloads, cole até {limit} links numa só mensagem.",
         "help": "<b>📖 Central de ajuda</b>\n\nEscolha um assunto abaixo.",
         "downloads": ("🎬 Vídeos e fotos",
@@ -28,6 +33,11 @@ _COPY = {
         "help_button": "📖 Ajuda e comandos",
     },
     "en": {
+        "inline_button": "⚡ Try inline",
+        "settings_button": "⚙️ Settings",
+        "share_button": "🚀 Share bot",
+        "add_button": "➕ Add to group",
+        "share_text": "Fast downloader bot for Instagram, TikTok, YouTube & more!",
         "start": "<b>Welcome to Save Vídeo DL Bot!</b>\n\nSend a link to download video, photos, or audio. For multiple downloads, paste up to {limit} links in one message.",
         "help": "<b>📖 Help center</b>\n\nChoose a topic below.",
         "downloads": ("🎬 Videos and photos",
@@ -52,6 +62,11 @@ _COPY = {
         "help_button": "📖 Help and commands",
     },
     "es": {
+        "inline_button": "⚡ Modo inline",
+        "settings_button": "⚙️ Configuración",
+        "share_button": "🚀 Compartir bot",
+        "add_button": "➕ Añadir a un grupo",
+        "share_text": "Bot para descargar vídeos de Instagram, TikTok, YouTube y más!",
         "start": "<b>¡Bienvenido a Save Vídeo DL Bot!</b>\n\nEnvía un enlace para descargar vídeo, fotos o audio. Para varias descargas, pega hasta {limit} enlaces en un solo mensaje.",
         "help": "<b>📖 Centro de ayuda</b>\n\nElige un tema.",
         "downloads": ("🎬 Vídeos y fotos",

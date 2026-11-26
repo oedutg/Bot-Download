@@ -20,7 +20,6 @@ from sqlalchemy import insert as sql_insert
 from app_context import set_app_context
 from config import (
     API_SECRET,
-    BOT_COMMANDS,
     BOT_SESSION_CONNECTION_LIMIT,
     BOT_TOKEN,
     CUSTOM_API_URL,
@@ -32,6 +31,7 @@ from config import (
     WEBHOOK_SECRET,
     WEBHOOK_URL,
 )
+from messages.command_menu import command_menus
 from services.download.queue import shutdown_download_queue
 from services.logger import logger as logging
 from services.runtime.analytics_status import record_drop as record_analytics_drop
@@ -371,10 +371,16 @@ async def main():
                 dp.callback_query.outer_middleware(middleware)
                 dp.inline_query.outer_middleware(middleware)
 
-            try:
-                await bot.set_my_commands(commands=BOT_COMMANDS)
-            except Exception as exc:
-                logging.warning("Rate limit ao configurar comandos: %s", exc)
+            for scope, language, commands in command_menus():
+                try:
+                    await bot.set_my_commands(
+                        commands=commands, scope=scope, language_code=language
+                    )
+                except Exception as exc:
+                    logging.warning(
+                        "Could not configure commands: scope=%s language=%s error=%s",
+                        scope.type, language, exc,
+                    )
 
             webhook_url = f"{WEBHOOK_URL.rstrip('/')}{WEBHOOK_PATH}"
             await bot.set_webhook(
