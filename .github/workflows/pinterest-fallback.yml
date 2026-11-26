@@ -63,7 +63,7 @@ jobs:
           python-version: "3.12"
       - name: Install bot dependencies excluding optional Shazam and gallery-dl
         run: |
-          sed -e '/^shazamio$/d' -e '/^gallery-dl$/d' requirements.txt > /tmp/requirements-pinterest.txt
+          sed -e '/^shazamio==/d' -e '/^gallery-dl==/d' requirements.txt > /tmp/requirements-pinterest.txt
           python -m pip install --disable-pip-version-check \
             -r /tmp/requirements-pinterest.txt pytest pytest-asyncio
       - name: Check source compilation
