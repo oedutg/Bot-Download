@@ -49,9 +49,8 @@ async def test_added_router_works_in_batch_and_deletion_waits(monkeypatch):
     monkeypatch.setattr(types.Message, "answer", status)
     monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 2)
     monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
-    for name in ("update_info", "send_analytics", "safe_delete_message"):
+    for name in ("update_info", "send_analytics", "safe_edit_text"):
         monkeypatch.setattr(media_download, name, AsyncMock())
-    monkeypatch.setattr(media_download.asyncio, "sleep", AsyncMock())
 
     @extra.message(F.text.startswith("https://downloads.example/"))
     async def handle_link(message: types.Message):
@@ -70,3 +69,42 @@ async def test_added_router_works_in_batch_and_deletion_waits(monkeypatch):
 
     assert seen == [(42, url) for url in urls[:6]]
     delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_long_batch_edits_processing_before_finished(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    original = make_message("https://clips.twitch.tv/Clip-ID")
+    status = object()
+    answer = AsyncMock(return_value=status)
+    progress = asyncio.Event()
+    edits = []
+
+    async def edit(message, text, **kwargs):
+        assert message is status
+        assert kwargs["parse_mode"] == "HTML"
+        edits.append(text)
+        if 'emoji-id="5260491539167073671"' in text:
+            progress.set()
+
+    async def deliver(data):
+        await asyncio.wait_for(progress.wait(), timeout=1)
+
+    monkeypatch.setattr(types.Message, "answer", answer)
+    monkeypatch.setattr(media_download, "safe_edit_text", edit)
+    monkeypatch.setattr(media_download, "_BATCH_PROCESSING_DELAY", 0)
+    monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 2)
+    monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
+    monkeypatch.setattr(media_download, "update_info", AsyncMock())
+    monkeypatch.setattr(media_download, "send_analytics", AsyncMock())
+    item = SimpleNamespace(deliver=deliver)
+
+    await media_download.process_batch_links(original, batch_items=[item, item], batch_total=2)
+
+    answer.assert_awaited_once()
+    assert 'emoji-id="6323328338123293863"' in answer.await_args.args[0]
+    assert len(edits) == 2
+    assert 'emoji-id="5260491539167073671"' in edits[0]
+    assert 'emoji-id="5866355487255039002"' in edits[1]

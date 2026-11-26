@@ -13,16 +13,19 @@ from config import (
 )
 from handlers.batch_routes import BatchItem, deferred_source_deletes, resolve_batch
 from handlers.commands import open_help_page, update_info
-from handlers.utils import get_message_text, maybe_delete_user_message, safe_delete_message
+from handlers.utils import get_message_text, maybe_delete_user_message, safe_edit_text
 from services.download.queue import get_download_queue
 from services.logger import logger as logging, summarize_url_for_log
-from services.stats.constants import SERVICE_DISPLAY_NAMES
 from services.inline.album_links import get_inline_album_request
 from services.links.detection import extract_supported_link
 
 logging = logging.bind(service="media_download")
 
 _MAX_BATCH_LINKS = max(1, int(BATCH_LINKS_MAX_ITEMS))
+_BATCH_START_EMOJI = '<tg-emoji emoji-id="6323328338123293863">📦</tg-emoji>'
+_BATCH_PROCESSING_EMOJI = '<tg-emoji emoji-id="5260491539167073671">🔄</tg-emoji>'
+_BATCH_PROCESSING_DELAY = 4.0
+_BATCH_END_EMOJI = '<tg-emoji emoji-id="5866355487255039002">🚀</tg-emoji>'
 _ALBUM_SERVICES = {"instagram", "threads", "tiktok", "pinterest", "twitter"}
 
 
@@ -158,24 +161,36 @@ async def process_batch_links(
     await update_info(message)
 
     concurrency = min(len(batch_items), _resolve_batch_concurrency())
-    status = await message.answer(
-        bm.batch_links_started(len(batch_items), batch_total, lang=user_lang),
-        parse_mode="HTML",
-    )
+    running_text = bm.batch_links_started(len(batch_items), batch_total, lang=user_lang)
+    status = await message.answer(f"{_BATCH_START_EMOJI} {running_text}", parse_mode="HTML")
+    finished = asyncio.Event()
+
+    async def show_processing() -> None:
+        try:
+            await asyncio.wait_for(finished.wait(), timeout=_BATCH_PROCESSING_DELAY)
+        except TimeoutError:
+            await safe_edit_text(
+                status, f"{_BATCH_PROCESSING_EMOJI} {running_text}", parse_mode="HTML"
+            )
+
+    processing_update = asyncio.create_task(show_processing())
     deletes = []
     token = deferred_source_deletes.set(deletes)
     try:
-        await safe_delete_message(status)
-        status = None
-        await _process_batch_links_parallel(message, batch_items, concurrency, data)
-        status = await message.answer(bm.batch_links_finished(len(batch_items), lang=user_lang))
+        try:
+            await _process_batch_links_parallel(message, batch_items, concurrency, data)
+        finally:
+            finished.set()
+            await processing_update
+        await safe_edit_text(
+            status,
+            f"{_BATCH_END_EMOJI} " + bm.batch_links_finished(len(batch_items), lang=user_lang),
+            parse_mode="HTML",
+        )
     finally:
         deferred_source_deletes.reset(token)
         if (message.chat.id, message.message_id) in deletes:
             await maybe_delete_user_message(message, "on")
-        if status:
-            await asyncio.sleep(2)
-            await safe_delete_message(status)
 
 
 async def _process_batch_links_parallel(
@@ -187,21 +202,15 @@ async def _process_batch_links_parallel(
     user_lang = await db.get_language(message.from_user.id)
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
-    async def run_one(index: int, item: BatchItem) -> None:
+    async def run_one(item: BatchItem) -> None:
         async with semaphore:
-            service_name = SERVICE_DISPLAY_NAMES.get(item.service, item.service.title())
-            status = await message.answer(
-                bm.batch_link_progress(index, len(items), service_name, lang=user_lang),
-            )
             try:
                 await item.deliver(data)
             except Exception:
                 logging.exception("Batch link failed: service=%s", item.service)
                 await message.answer(bm.something_went_wrong(lang=user_lang))
-            finally:
-                await safe_delete_message(status)
 
-    await asyncio.gather(*(run_one(index, item) for index, item in enumerate(items, 1)))
+    await asyncio.gather(*(run_one(item) for item in items))
 
 
 async def show_supported_sites(call: types.CallbackQuery):

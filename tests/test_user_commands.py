@@ -453,26 +453,26 @@ async def test_process_batch_links_dispatches_each_supported_link(monkeypatch):
     monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
     message = DummyMessage()
     message.text = "https://youtu.be/demo and https://pin.it/demo123"
-    status_messages = [
-        SimpleNamespace(delete=AsyncMock()),
-        SimpleNamespace(delete=AsyncMock()),
-        SimpleNamespace(delete=AsyncMock()),
-        SimpleNamespace(delete=AsyncMock()),
-    ]
-    message.answer = AsyncMock(side_effect=status_messages)
+    status = SimpleNamespace()
+    message.answer = AsyncMock(return_value=status)
+    edit = AsyncMock()
+    monkeypatch.setattr(media_download, "safe_edit_text", edit)
     youtube = SimpleNamespace(service="youtube", deliver=AsyncMock())
     pinterest = SimpleNamespace(service="pinterest", deliver=AsyncMock())
     monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 1)
     monkeypatch.setattr(media_download, "send_analytics", AsyncMock())
     monkeypatch.setattr(media_download, "update_info", AsyncMock())
-    monkeypatch.setattr(media_download.asyncio, "sleep", AsyncMock())
 
     await user.process_batch_links(message, batch_items=[youtube, pinterest], batch_total=2)
 
     youtube.deliver.assert_awaited_once_with({})
     pinterest.deliver.assert_awaited_once_with({})
-    assert message.answer.await_count == 4
-    assert all(status.delete.await_count == 1 for status in status_messages)
+    message.answer.assert_awaited_once()
+    assert '<tg-emoji emoji-id="6323328338123293863">' in message.answer.await_args.args[0]
+    edit.assert_awaited_once()
+    assert edit.await_args.args[0] is status
+    assert '<tg-emoji emoji-id="5866355487255039002">' in edit.await_args.args[1]
+    assert edit.await_args.kwargs["parse_mode"] == "HTML"
 
 
 @pytest.mark.asyncio
@@ -480,26 +480,26 @@ async def test_process_batch_links_can_run_parallel_when_load_is_low(monkeypatch
     monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
     message = DummyMessage()
     message.text = "https://youtu.be/demo and https://pin.it/demo123"
-    status_messages = [
-        SimpleNamespace(delete=AsyncMock()),
-        SimpleNamespace(delete=AsyncMock()),
-        SimpleNamespace(delete=AsyncMock()),
-        SimpleNamespace(delete=AsyncMock()),
-    ]
-    message.answer = AsyncMock(side_effect=status_messages)
+    status = SimpleNamespace()
+    message.answer = AsyncMock(return_value=status)
+    edit = AsyncMock()
+    monkeypatch.setattr(media_download, "safe_edit_text", edit)
     youtube = SimpleNamespace(service="youtube", deliver=AsyncMock())
     pinterest = SimpleNamespace(service="pinterest", deliver=AsyncMock())
     monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 2)
     monkeypatch.setattr(media_download, "send_analytics", AsyncMock())
     monkeypatch.setattr(media_download, "update_info", AsyncMock())
-    monkeypatch.setattr(media_download.asyncio, "sleep", AsyncMock())
 
     await user.process_batch_links(message, batch_items=[youtube, pinterest], batch_total=2)
 
     youtube.deliver.assert_awaited_once_with({})
     pinterest.deliver.assert_awaited_once_with({})
-    assert message.answer.await_count == 4
-    assert all(status.delete.await_count == 1 for status in status_messages)
+    message.answer.assert_awaited_once()
+    assert '<tg-emoji emoji-id="6323328338123293863">' in message.answer.await_args.args[0]
+    edit.assert_awaited_once()
+    assert edit.await_args.args[0] is status
+    assert '<tg-emoji emoji-id="5866355487255039002">' in edit.await_args.args[1]
+    assert edit.await_args.kwargs["parse_mode"] == "HTML"
 
 
 @pytest.mark.asyncio
