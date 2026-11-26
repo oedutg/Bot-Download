@@ -191,11 +191,12 @@ def _help_keyboard(
     labels = help_copy(lang)
     if page == "start":
         existing = kb.start_keyboard(bot_username, ref_user_id=ref_user_id, lang=lang)
-        rows = [[InlineKeyboardButton(text=labels["help_button"], callback_data="help_menu:help")]]
+        rows = [[InlineKeyboardButton(text=labels["help_button"], callback_data="help_menu:help", style="primary")]]
         return InlineKeyboardMarkup(inline_keyboard=rows + existing.inline_keyboard)
     if page == "help":
         buttons = [
-            InlineKeyboardButton(text=labels[section][0], callback_data=f"help_menu:{section}")
+            InlineKeyboardButton(text=labels[section][0], callback_data=f"help_menu:{section}",
+                                 style="primary" if section == "downloads" else None)
             for section in HELP_SECTIONS
         ]
         rows = [buttons[:2], buttons[2:]]
