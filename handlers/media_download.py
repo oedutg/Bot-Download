@@ -13,7 +13,9 @@ from config import (
 )
 from handlers.batch_routes import BatchItem, deferred_source_deletes, resolve_batch
 from handlers.commands import open_help_page, update_info
-from handlers.utils import get_message_text, maybe_delete_user_message, safe_edit_text
+from handlers.utils import (
+    get_message_text, maybe_delete_user_message, safe_delete_message, safe_edit_text,
+)
 from services.download.queue import get_download_queue
 from services.logger import logger as logging, summarize_url_for_log
 from services.inline.album_links import get_inline_album_request
@@ -25,6 +27,7 @@ _MAX_BATCH_LINKS = max(1, int(BATCH_LINKS_MAX_ITEMS))
 _BATCH_START_EMOJI = '<tg-emoji emoji-id="6323328338123293863">📦</tg-emoji>'
 _BATCH_PROCESSING_EMOJI = '<tg-emoji emoji-id="5260491539167073671">🔄</tg-emoji>'
 _BATCH_PROCESSING_DELAY = 4.0
+_BATCH_STATUS_DELETE_DELAY = 2.0
 _BATCH_END_EMOJI = '<tg-emoji emoji-id="5866355487255039002">🚀</tg-emoji>'
 _ALBUM_SERVICES = {"instagram", "threads", "tiktok", "pinterest", "twitter"}
 
@@ -187,8 +190,10 @@ async def process_batch_links(
             f"{_BATCH_END_EMOJI} " + bm.batch_links_finished(len(batch_items), lang=user_lang),
             parse_mode="HTML",
         )
+        await asyncio.sleep(_BATCH_STATUS_DELETE_DELAY)
     finally:
         deferred_source_deletes.reset(token)
+        await safe_delete_message(status)
         if (message.chat.id, message.message_id) in deletes:
             await maybe_delete_user_message(message, "on")
 

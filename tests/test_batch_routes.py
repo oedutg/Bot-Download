@@ -49,8 +49,10 @@ async def test_added_router_works_in_batch_and_deletion_waits(monkeypatch):
     monkeypatch.setattr(types.Message, "answer", status)
     monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 2)
     monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
-    for name in ("update_info", "send_analytics", "safe_edit_text"):
+    for name in ("update_info", "send_analytics", "safe_edit_text", "safe_delete_message"):
         monkeypatch.setattr(media_download, name, AsyncMock())
+
+    monkeypatch.setattr(media_download, "_BATCH_STATUS_DELETE_DELAY", 0)
 
     @extra.message(F.text.startswith("https://downloads.example/"))
     async def handle_link(message: types.Message):
@@ -81,11 +83,19 @@ async def test_long_batch_edits_processing_before_finished(monkeypatch):
     answer = AsyncMock(return_value=status)
     progress = asyncio.Event()
     edits = []
+    actions = []
+
+    async def sleep(delay):
+        actions.append(("sleep", delay))
+
+    async def delete(message):
+        actions.append(("delete", message))
 
     async def edit(message, text, **kwargs):
         assert message is status
         assert kwargs["parse_mode"] == "HTML"
         edits.append(text)
+        actions.append(("edit", message))
         if 'emoji-id="5260491539167073671"' in text:
             progress.set()
 
@@ -94,6 +104,8 @@ async def test_long_batch_edits_processing_before_finished(monkeypatch):
 
     monkeypatch.setattr(types.Message, "answer", answer)
     monkeypatch.setattr(media_download, "safe_edit_text", edit)
+    monkeypatch.setattr(media_download, "safe_delete_message", delete)
+    monkeypatch.setattr(media_download.asyncio, "sleep", sleep)
     monkeypatch.setattr(media_download, "_BATCH_PROCESSING_DELAY", 0)
     monkeypatch.setattr(media_download, "_resolve_batch_concurrency", lambda: 2)
     monkeypatch.setattr(media_download.db, "get_language", AsyncMock(return_value="pt"))
@@ -108,3 +120,4 @@ async def test_long_batch_edits_processing_before_finished(monkeypatch):
     assert len(edits) == 2
     assert 'emoji-id="5260491539167073671"' in edits[0]
     assert 'emoji-id="5866355487255039002"' in edits[1]
+    assert actions == [("edit", status), ("edit", status), ("sleep", 2.0), ("delete", status)]
